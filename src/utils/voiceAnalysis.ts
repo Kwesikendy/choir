@@ -1,15 +1,5 @@
 import { VoicePart } from '../types';
 
-/** A single note in the voice test */
-export interface TestNote {
-  name: string;       // e.g. "C4"
-  frequency: number;  // Hz
-  label: string;      // display label e.g. "Middle C"
-}
-
-/** Score (0–100) achieved on each test note */
-export type NoteScores = Record<string, number>; // key = TestNote.name
-
 export interface VoicePartResult {
   part: VoicePart;
   label: string;
@@ -22,30 +12,22 @@ export interface VoicePartResult {
 }
 
 // ---------------------------------------------------------------------------
-// Test notes — span the full SATB range (E2 → A5)
+// Standard vocal ranges in MIDI Note Numbers
+// MIDI 69 = A4 (440Hz). 
 // ---------------------------------------------------------------------------
-export const TEST_NOTES: TestNote[] = [
-  { name: 'E2',  frequency: 82.41,  label: 'Very Low' },
-  { name: 'A2',  frequency: 110.00, label: 'Low' },
-  { name: 'C3',  frequency: 130.81, label: 'Low-Mid' },
-  { name: 'E3',  frequency: 164.81, label: 'Mid-Low' },
-  { name: 'G3',  frequency: 196.00, label: 'Mid' },
-  { name: 'C4',  frequency: 261.63, label: 'Middle C' },
-  { name: 'E4',  frequency: 329.63, label: 'Mid-High' },
-  { name: 'G4',  frequency: 392.00, label: 'High-Mid' },
-  { name: 'C5',  frequency: 523.25, label: 'High' },
-  { name: 'E5',  frequency: 659.25, label: 'Very High' },
-  { name: 'A5',  frequency: 880.00, label: 'Top' },
-];
+const PART_RANGES = {
+  bass:    { minMidi: 40, maxMidi: 64 }, // E2 to E4
+  tenor:   { minMidi: 48, maxMidi: 67 }, // C3 to G4
+  alto:    { minMidi: 53, maxMidi: 74 }, // F3 to D5
+  soprano: { minMidi: 60, maxMidi: 81 }, // C4 to A5
+};
 
-// Voice part "coverage" over the test notes (1 = this note is in range, 0 = not)
-// Based on standard SATB ranges
-const PART_COVERAGE: Record<VoicePart, number[]> = {
-  //           E2  A2  C3  E3  G3  C4  E4  G4  C5  E5  A5
-  bass:    [   1,  1,  1,  1,  0.5,0.2, 0,  0,  0,  0,  0 ],
-  tenor:   [   0, 0.2, 1,  1,  1,  1, 0.8, 0.3, 0,  0,  0 ],
-  alto:    [   0,  0,  0, 0.2, 1,  1,  1,  1, 0.8, 0.3, 0 ],
-  soprano: [   0,  0,  0,  0,  0, 0.5, 1,  1,  1,  1,  1 ],
+// Target natural speaking pitch (Tessitura anchor)
+const PART_SPEAKING_PITCH = {
+  bass:    { targetMidi: 43 }, // ~100 Hz (G2)
+  tenor:   { targetMidi: 49 }, // ~138 Hz (C#3)
+  alto:    { targetMidi: 55 }, // ~185 Hz (F#3)
+  soprano: { targetMidi: 59 }, // ~246 Hz (B3)
 };
 
 const PART_META: Record<VoicePart, {
@@ -54,7 +36,7 @@ const PART_META: Record<VoicePart, {
 }> = {
   soprano: {
     label: 'Soprano',
-    description: 'You have a bright, high voice. Sopranos carry the melody and often shine in lead roles.',
+    description: 'You effortlessly reach high notes. Sopranos carry the melody and shine in lead roles.',
     color: '#FF6B9D',
     icon: '🌸',
     rangeLabel: 'C4 – A5',
@@ -62,7 +44,7 @@ const PART_META: Record<VoicePart, {
   },
   alto: {
     label: 'Alto',
-    description: 'Your voice has warmth and richness in the middle-lower range. Altos are the harmonic backbone of any choir.',
+    description: 'Your voice has warmth and extreme richness. Altos are the harmonic backbone of any choir.',
     color: '#9B59B6',
     icon: '🍇',
     rangeLabel: 'F3 – D5',
@@ -70,7 +52,7 @@ const PART_META: Record<VoicePart, {
   },
   tenor: {
     label: 'Tenor',
-    description: 'You have a strong male high voice. Tenors often carry important melodies and harmonies.',
+    description: 'You have a commanding, strong high voice. Tenors often carry important melodies and harmonies.',
     color: '#3498DB',
     icon: '💎',
     rangeLabel: 'C3 – G4',
@@ -78,7 +60,7 @@ const PART_META: Record<VoicePart, {
   },
   bass: {
     label: 'Bass',
-    description: 'Your voice has a deep, resonant quality. Basses are the foundation every choir is built on.',
+    description: 'Your voice has a deep, resonant, and grounding quality. Basses are the foundation of a choir.',
     color: '#27AE60',
     icon: '🌊',
     rangeLabel: 'E2 – E4',
@@ -86,40 +68,51 @@ const PART_META: Record<VoicePart, {
   },
 };
 
+// Convert Hz to MIDI note number (Continuous floating point)
+export function freqToMidi(freq: number): number {
+  if (freq === 0) return 0;
+  return 69 + 12 * Math.log2(freq / 440);
+}
+
 // ---------------------------------------------------------------------------
 // Core scoring algorithm
 // ---------------------------------------------------------------------------
-
-/**
- * Given the user's per-note scores (0–100), return ranked voice part results.
- * Algorithm:
- *   For each voice part, compute a weighted average of the user's scores
- *   where each test note is weighted by how "central" it is to that part.
- *   Parts that require notes the user scored badly on are penalised.
- */
-export function analyseVoiceRange(scores: NoteScores): VoicePartResult[] {
+export function analyseNaturalVoiceRange(minFreq: number, maxFreq: number, speakingFreq: number): VoicePartResult[] {
   const parts: VoicePart[] = ['soprano', 'alto', 'tenor', 'bass'];
+  const userMinMidi = freqToMidi(minFreq);
+  const userMaxMidi = freqToMidi(maxFreq);
+  const userSpeakingMidi = freqToMidi(speakingFreq);
+  const userRange = Math.max(1, userMaxMidi - userMinMidi);
 
   const results: VoicePartResult[] = parts.map((part) => {
-    const coverage = PART_COVERAGE[part];
-    let weightedScore = 0;
-    let totalWeight = 0;
+    const { minMidi, maxMidi } = PART_RANGES[part];
+    const partRange = maxMidi - minMidi;
 
-    TEST_NOTES.forEach((note, idx) => {
-      const weight = coverage[idx];
-      if (weight === 0) return;
-      const noteScore = scores[note.name] ?? 0;
-      weightedScore += noteScore * weight;
-      totalWeight += weight;
-    });
+    // Calculate how many semitones of the standard choir part overlap with the user's natural vocal bounds
+    const overlapMin = Math.max(minMidi, userMinMidi);
+    const overlapMax = Math.min(maxMidi, userMaxMidi);
+    const overlap = Math.max(0, overlapMax - overlapMin);
 
-    const fitScore = totalWeight > 0 ? Math.round(weightedScore / totalWeight) : 0;
-    const meta = PART_META[part];
+    // Score based on how much of the Part's range the user covers
+    // and how little they have to strain out of it
+    const coveragePercentage = overlap / partRange;
 
+    // If the user's center is very close to the part's center, boost securely
+    const userCenter = (userMinMidi + userMaxMidi) / 2;
+    const partCenter = (minMidi + maxMidi) / 2;
+    const centerProximityBonus = Math.max(0, 1 - Math.abs(userCenter - partCenter) / 12); // up to 1 octave away
+
+    // Speaking Pitch match (Highly weighted because speaking pitch reveals true physiological tessitura)
+    const speakingDifference = Math.abs(userSpeakingMidi - PART_SPEAKING_PITCH[part].targetMidi);
+    const speakingProximityBonus = Math.max(0, 1 - (speakingDifference / 8)); // 0 if > 8 semitones away
+
+    // Final mathematical weighting (40% coverage constraint, 20% range center, 40% speaking tessitura)
+    let rawScore = (coveragePercentage * 40) + (centerProximityBonus * 20) + (speakingProximityBonus * 40);
+    
     return {
       part,
-      score: fitScore,
-      ...meta,
+      score: Math.min(100, Math.round(rawScore)),
+      ...PART_META[part],
     };
   });
 
@@ -134,7 +127,7 @@ export function getConfidenceLabel(topScore: number, secondScore: number): {
   label: string; color: string;
 } {
   const gap = topScore - secondScore;
-  if (topScore >= 70 && gap >= 20) return { label: 'Strong match', color: '#22c55e' };
+  if (topScore >= 70 && gap >= 15) return { label: 'Strong match', color: '#22c55e' };
   if (topScore >= 50 && gap >= 10) return { label: 'Good match', color: '#eab308' };
-  return { label: 'Possible match — consider both top options', color: '#f97316' };
+  return { label: 'Possible match — pick what feels most comfortable', color: '#f97316' };
 }

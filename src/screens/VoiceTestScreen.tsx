@@ -1,260 +1,293 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Animated, Alert,
+  ScrollView, Animated
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Audio } from 'expo-av';
 import { useUserProgress } from '../hooks/useUserProgress';
 import { usePitchDetection } from '../hooks/usePitchDetection';
-import { calculateAccuracy } from '../utils/pitchUtils';
-import { playReferenceNote, stopReferenceNote } from '../utils/audioUtils';
 import {
-  TEST_NOTES, TestNote, NoteScores,
-  analyseVoiceRange, VoicePartResult, getConfidenceLabel,
+  analyseNaturalVoiceRange, VoicePartResult, getConfidenceLabel
 } from '../utils/voiceAnalysis';
 import { PitchResult } from '../types';
 
-type Stage = 'intro' | 'testing' | 'results';
+type Stage = 'intro' | 'lowest' | 'highest' | 'speaking' | 'results';
 
-const NOTE_LISTEN_SECS = 4;   // seconds to listen per note
-const MIN_SCORE_THRESHOLD = 40; // minimum score to "count" as hitting a note
+const LISTEN_SECONDS = 8; // Extended for siren sliding
 
 export function VoiceTestScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { selectPart } = useUserProgress();
 
   const [stage, setStage] = useState<Stage>('intro');
-  const [noteIndex, setNoteIndex] = useState(0);
-  const [noteScores, setNoteScores] = useState<NoteScores>({});
+  const [minFreq, setMinFreq] = useState(0);
+  const [maxFreq, setMaxFreq] = useState(0);
+  const [speakFreq, setSpeakFreq] = useState(0);
   const [results, setResults] = useState<VoicePartResult[]>([]);
 
-  // Per-note state
-  const [isListening, setIsListening] = useState(false);
-  const [countdown, setCountdown] = useState(NOTE_LISTEN_SECS);
-  const [liveAccuracy, setLiveAccuracy] = useState(0);
-  const [bestAccuracy, setBestAccuracy] = useState(0);
-  const [notePhase, setNotePhase] = useState<'ready' | 'play' | 'sing' | 'done'>('ready');
-
-  const currentNote: TestNote = TEST_NOTES[noteIndex];
-  const bestAccuracyRef = useRef(0);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ---------------------------------------------------------------------------
-  // Pitch detection — target = current test note
-  // ---------------------------------------------------------------------------
-  const { startListening, stopListening, error: micError } = usePitchDetection({
-    targetFrequency: currentNote?.frequency,
-    onPitchDetected: useCallback((result: PitchResult | null) => {
-      if (!result) { setLiveAccuracy(0); return; }
-      const acc = calculateAccuracy(result.cents);
-      setLiveAccuracy(acc);
-      if (acc > bestAccuracyRef.current) {
-        bestAccuracyRef.current = acc;
-        setBestAccuracy(acc);
-      }
-    }, []),
-  });
-
-  // ---------------------------------------------------------------------------
-  // Per-note flow: ready → play reference → sing → done
-  // ---------------------------------------------------------------------------
-  const startNoteFlow = useCallback(async () => {
-    bestAccuracyRef.current = 0;
-    setBestAccuracy(0);
-    setLiveAccuracy(0);
-    setCountdown(NOTE_LISTEN_SECS);
-    setNotePhase('play');
-
-    // 1. Play reference note
-    await playReferenceNote(currentNote.frequency, 1200);
-
-    // Small gap after reference
-    await new Promise(r => setTimeout(r, 400));
-
-    // 2. Start listening
-    setNotePhase('sing');
-    setIsListening(true);
-    await startListening();
-
-    // 3. Countdown
-    let remaining = NOTE_LISTEN_SECS;
-    countdownRef.current = setInterval(() => {
-      remaining -= 1;
-      setCountdown(remaining);
-      if (remaining <= 0) {
-        clearInterval(countdownRef.current!);
-        countdownRef.current = null;
-        finishNote();
-      }
-    }, 1000);
-  }, [currentNote, startListening]);
-
-  const finishNote = useCallback(async () => {
-    setIsListening(false);
-    setNotePhase('done');
-    await stopListening();
-    await stopReferenceNote();
-
-    // Record best score for this note
-    const score = bestAccuracyRef.current;
-    setNoteScores(prev => ({ ...prev, [currentNote.name]: score }));
-  }, [currentNote, stopListening]);
-
-  // ---------------------------------------------------------------------------
-  // Advance to next note or show results
-  // ---------------------------------------------------------------------------
-  const handleNext = useCallback(async () => {
-    const updatedScores: NoteScores = {
-      ...noteScores,
-      [currentNote.name]: bestAccuracyRef.current,
-    };
-
-    if (noteIndex < TEST_NOTES.length - 1) {
-      setNoteIndex(i => i + 1);
-      setNotePhase('ready');
-      setBestAccuracy(0);
-      setLiveAccuracy(0);
+  const handleFinishPhase = (type: 'lowest' | 'highest' | 'speaking', freq: number) => {
+    if (type === 'lowest') {
+      setMinFreq(freq);
+      setStage('highest');
+    } else if (type === 'highest') {
+      setMaxFreq(freq);
+      setStage('speaking');
     } else {
-      // All notes done — compute results
-      const ranked = analyseVoiceRange(updatedScores);
+      setSpeakFreq(freq);
+      const ranked = analyseNaturalVoiceRange(minFreq, maxFreq, freq);
       setResults(ranked);
       setStage('results');
     }
-  }, [noteIndex, noteScores, currentNote]);
+  };
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      stopListening();
-      stopReferenceNote();
-    };
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Accept recommendation
-  // ---------------------------------------------------------------------------
   const handleAcceptRecommendation = async (part: VoicePartResult) => {
     await selectPart(part.part);
     navigation.navigate('PartOverview', { part: part.part });
   };
 
-  // ---------------------------------------------------------------------------
-  // Render helpers
-  // ---------------------------------------------------------------------------
-  const progress = ((noteIndex + (notePhase === 'done' ? 1 : 0)) / TEST_NOTES.length) * 100;
+  if (stage === 'intro') {
+    return <IntroStage onStart={() => setStage('lowest')} onBack={() => navigation.goBack()} />;
+  }
 
-  if (stage === 'intro') return <IntroStage onStart={() => setStage('testing')} onBack={() => navigation.goBack()} />;
+  if (stage === 'lowest' || stage === 'highest' || stage === 'speaking') {
+    return (
+      <ExtremeTestStage 
+        key={stage}
+        type={stage} 
+        onDone={(freq) => handleFinishPhase(stage, freq)} 
+        onBack={() => {
+          if (stage === 'lowest') setStage('intro');
+          if (stage === 'highest') setStage('lowest');
+          if (stage === 'speaking') setStage('highest');
+        }}
+      />
+    );
+  }
 
-  if (stage === 'results') return (
+  return (
     <ResultsStage
       results={results}
-      noteScores={noteScores}
+      minFreq={minFreq}
+      maxFreq={maxFreq}
+      speakFreq={speakFreq}
       onAccept={handleAcceptRecommendation}
       onChooseManually={() => navigation.navigate('Home')}
     />
   );
+}
 
-  // ---------------------------------------------------------------------------
-  // Testing stage
-  // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Testing Stage Component (Lowest, Highest, Speaking)
+// ---------------------------------------------------------------------------
+function ExtremeTestStage({ type, onDone, onBack }: { type: 'lowest' | 'highest' | 'speaking', onDone: (f: number) => void, onBack: () => void }) {
+  const [countdown, setCountdown] = useState(LISTEN_SECONDS);
+  const [phase, setPhase] = useState<'ready' | 'sing' | 'done'>('ready');
+  
+  const extremeRef = useRef(type === 'lowest' ? 10000 : 0);
+  const speakSumRef = useRef(0);
+  const speakCountRef = useRef(0);
+
+  const [liveNote, setLiveNote] = useState('--');
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Animation for the graphical depth gauge
+  const gaugeAnim = useRef(new Animated.Value(0)).current;
+
+  const { startListening, stopListening, error: micError } = usePitchDetection({
+    onPitchDetected: useCallback((result: PitchResult | null) => {
+      if (!result) return;
+      
+      let fillPercentage = 0;
+
+      if (type === 'lowest') {
+        if (result.frequency > 50 && result.frequency < extremeRef.current) extremeRef.current = result.frequency;
+        // Visual depth scale for Lowest (starts dropping from 300Hz down to 60Hz)
+        fillPercentage = Math.max(0, Math.min(100, ((300 - result.frequency) / (300 - 60)) * 100));
+
+      } else if (type === 'highest') {
+        if (result.frequency < 1200 && result.frequency > extremeRef.current) extremeRef.current = result.frequency;
+        // Visual height scale for Highest (starts rising from 200Hz up to 1000Hz)
+        fillPercentage = Math.max(0, Math.min(100, ((result.frequency - 200) / (1000 - 200)) * 100));
+
+      } else if (type === 'speaking') {
+        if (result.frequency > 60 && result.frequency < 400) {
+          speakSumRef.current += result.frequency;
+          speakCountRef.current += 1;
+          extremeRef.current = speakSumRef.current / speakCountRef.current;
+        }
+        fillPercentage = 50; // Speaking doesn't use the gauge logic
+      }
+      
+      setLiveNote(result.note);
+
+      // Smoothly animate the gauge thermometer
+      Animated.timing(gaugeAnim, {
+        toValue: fillPercentage,
+        duration: 80, // fluid real-time reaction
+        useNativeDriver: false
+      }).start();
+
+    }, [type]),
+  });
+
+  const startTest = async () => {
+    extremeRef.current = type === 'lowest' ? 10000 : 0;
+    speakSumRef.current = 0;
+    speakCountRef.current = 0;
+    
+    setLiveNote('--');
+    setPhase('sing');
+    setCountdown(LISTEN_SECONDS);
+    gaugeAnim.setValue(0);
+
+    await startListening();
+
+    let remain = LISTEN_SECONDS;
+    timerRef.current = setInterval(() => {
+      remain -= 1;
+      setCountdown(remain);
+      if (remain <= 0) {
+        if (timerRef.current) clearInterval(timerRef.current);
+        stopListening();
+        setPhase('done');
+      }
+    }, 1000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      stopListening();
+    };
+  }, []);
+
+  const progressGroup = type === 'lowest' ? 33 : type === 'highest' ? 66 : 100;
+  
+  const getTitles = () => {
+    if (type === 'lowest') return { phase: 'Phase 1: Deepest Range', action: 'Find your floor', instruction: 'The Low Siren', desc: 'Sliiiide your voice continuously downwards. Keep dragging it deeper like a fire engine siren until it naturally stops or croaks.' };
+    if (type === 'highest') return { phase: 'Phase 2: Highest Range', action: 'Reach your peak', instruction: 'The High Siren', desc: 'Sliiiide your voice continuously upwards. Keep lifting it higher and higher like a siren until you absolutely can\'t go further.' };
+    return { phase: 'Phase 3: Natural Speaking', action: 'Read out loud', instruction: 'Read the phrase naturally', desc: 'Read exactly in your everyday talking voice. Avoid "putting on a voice" or speaking abnormally high or low.' };
+  };
+  
+  const t = getTitles();
+
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#1a1a2e', '#16213e']} style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>← Exit Test</Text>
+        <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+          <Text style={styles.backBtnText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Voice Discovery</Text>
-        <Text style={styles.headerSub}>Note {noteIndex + 1} of {TEST_NOTES.length}</Text>
-
-        {/* Progress bar */}
+        <Text style={styles.headerSub}>{t.phase}</Text>
         <View style={styles.progressBg}>
-          <View style={[styles.progressFill, { width: `${progress}%` as any }]} />
+          <View style={[styles.progressFill, { width: `${progressGroup}%` as any }]} />
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Note card */}
-        <View style={styles.noteCard}>
-          <Text style={styles.noteLabelTag}>{currentNote.label}</Text>
-          <Text style={styles.noteName}>{currentNote.name}</Text>
-          <Text style={styles.noteFreq}>{Math.round(currentNote.frequency)} Hz</Text>
+      <View style={styles.content}>
+        
+        {/* Dynamic Siren Gauge (Hidden during speaking phase) */}
+        {type !== 'speaking' && phase === 'sing' && (
+          <View style={styles.gaugeContainer}>
+             <View style={styles.gaugeTrack}>
+                <Animated.View style={[
+                  styles.gaugeFill, 
+                  { 
+                    height: gaugeAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+                    backgroundColor: type === 'lowest' ? '#3b82f6' : '#ef4444',
+                    top: type === 'lowest' ? 0 : undefined,
+                    bottom: type === 'highest' ? 0 : undefined,
+                  }
+                ]} />
+             </View>
+             <Text style={styles.gaugeHint}>
+               {type === 'lowest' ? '↓ Slide Deeper' : '↑ Slide Higher'}
+             </Text>
+          </View>
+        )}
+
+        {/* Regular UI Box */}
+        <View style={[styles.noteCard, type !== 'speaking' && phase === 'sing' && { marginTop: 24, paddingVertical: 18 }]}>
+          <Text style={styles.noteLabelTag}>{t.action}</Text>
+          <Text style={styles.noteName}>{phase === 'ready' ? '?' : liveNote}</Text>
+          {phase === 'done' && (
+             <Text style={styles.extremeFound}>Locked: {Math.round(extremeRef.current === 10000 ? 0 : extremeRef.current)} Hz</Text>
+          )}
         </View>
 
-        {/* Phase UI */}
-        {notePhase === 'ready' && (
+        {phase === 'ready' && (
           <View style={styles.phaseBox}>
-            <Text style={styles.phaseTitle}>Ready?</Text>
-            <Text style={styles.phaseDesc}>
-              Tap below to hear the note, then sing it back as accurately as you can.
-            </Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={startNoteFlow}>
-              <Text style={styles.primaryBtnText}>♪ Hear &amp; Sing</Text>
+            <Text style={styles.phaseTitle}>{t.instruction}</Text>
+            {type === 'speaking' ? (
+               <View style={styles.sentenceCard}>
+                 <Text style={styles.sentenceText}>"The quick brown fox jumps over the lazy dog."</Text>
+               </View>
+            ) : null}
+            <Text style={styles.phaseDesc}>{t.desc}</Text>
+            <TouchableOpacity style={styles.primaryBtn} onPress={startTest}>
+              <Text style={styles.primaryBtnText}>🎤 Start Recording</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {notePhase === 'play' && (
-          <View style={styles.phaseBox}>
-            <Text style={styles.phaseAnimText}>♪</Text>
-            <Text style={styles.phaseTitle}>Listen carefully…</Text>
-          </View>
-        )}
-
-        {notePhase === 'sing' && (
+        {phase === 'sing' && (
           <View style={styles.phaseBox}>
             {micError ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>🎤 Microphone Error: {micError}</Text>
-                <Text style={styles.errorSub}>Please check app permissions in settings.</Text>
+                <Text style={styles.errorText}>🎤 Microphone Error</Text>
+                <Text style={styles.errorSub}>{micError}</Text>
               </View>
             ) : (
-              <>
-                <CountdownRing seconds={countdown} total={NOTE_LISTEN_SECS} accuracy={liveAccuracy} />
-                <Text style={styles.singPrompt}>Sing the note!</Text>
-                <AccuracyBar accuracy={liveAccuracy} best={bestAccuracy} />
-              </>
+              <View style={{ alignItems: 'center' }}>
+                <View style={[styles.countdown, type !== 'speaking' && { flexDirection: 'row', gap: 12 }]}>
+                  <Text style={[styles.countdownNum, { color: '#22c55e', fontSize: type !== 'speaking' ? 42 : 86, lineHeight: type !== 'speaking' ? 48 : 95 }]}>{countdown}</Text>
+                  <Text style={styles.countdownLabel}>seconds{type !== 'speaking' ? ' left to slide' : ' left'}</Text>
+                </View>
+                {type === 'speaking' ? (
+                   <View style={styles.sentenceCard}>
+                     <Text style={[styles.sentenceText, { color: '#22c55e' }]}>"The quick brown fox jumps over the lazy dog."</Text>
+                   </View>
+                ) : (
+                   <Text style={[styles.singPrompt, { color: type === 'lowest' ? '#60a5fa' : '#f87171' }]}>
+                     Keep sliding {type === 'lowest' ? 'down' : 'up'}!
+                   </Text>
+                )}
+              </View>
             )}
           </View>
         )}
 
-        {notePhase === 'done' && (
-          <View style={styles.phaseBox}>
-            <ScoreDisplay score={bestAccuracy} />
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleNext}>
-              <Text style={styles.primaryBtnText}>
-                {noteIndex < TEST_NOTES.length - 1 ? 'Next Note →' : 'See Results →'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+        {phase === 'done' && (
+           <View style={styles.phaseBox}>
+              <Text style={styles.scoreLabel}>Capture secured! ✅</Text>
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => {
+                  let safeVal = extremeRef.current;
+                  if (safeVal === 10000 || safeVal === 0) {
+                    if (type === 'lowest') safeVal = 200;
+                    if (type === 'highest') safeVal = 400;
+                    if (type === 'speaking') safeVal = 250;
+                  }
+                  onDone(safeVal);
+              }}>
+                <Text style={styles.primaryBtnText}>
+                  {type === 'lowest' ? 'Proceed to Phase 2 →' : type === 'highest' ? 'Proceed to Phase 3 →' : 'See Analysis Results →'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.manualBtn} onPress={() => setPhase('ready')}>
+                <Text style={styles.manualBtnText}>Retake this phase</Text>
+              </TouchableOpacity>
+           </View>
         )}
-
-        {/* Mini note strip */}
-        <View style={styles.noteStrip}>
-          {TEST_NOTES.map((n, i) => (
-            <View
-              key={n.name}
-              style={[
-                styles.stripDot,
-                i < noteIndex && { backgroundColor: '#22c55e' },
-                i === noteIndex && { backgroundColor: '#fff', transform: [{ scale: 1.4 }] },
-                i > noteIndex && { backgroundColor: '#444' },
-              ]}
-            />
-          ))}
-        </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Intro Stage Component
 // ---------------------------------------------------------------------------
-
 function IntroStage({ onStart, onBack }: { onStart: () => void; onBack: () => void }) {
   return (
     <View style={styles.container}>
@@ -263,18 +296,17 @@ function IntroStage({ onStart, onBack }: { onStart: () => void; onBack: () => vo
           <Text style={styles.backBtnText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.introIcon}>🎤</Text>
-        <Text style={styles.introTitle}>Discover Your{'\n'}Voice Part</Text>
+        <Text style={styles.introTitle}>Discover Your{'\n'}True Range</Text>
         <Text style={styles.introSubtitle}>
-          Not sure where you fit? Let us find out.
+          We don't ask you to match difficult targets. You define your own limits.
         </Text>
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.introContent}>
         {[
-          { icon: '🎵', title: '11 Test Notes', body: 'You\'ll sing notes from very low to very high — don\'t worry if some feel impossible, that\'s expected!' },
-          { icon: '🎧', title: 'Hear First, Then Sing', body: 'We\'ll play each reference note so you know exactly what to aim for.' },
-          { icon: '📊', title: 'Instant Analysis', body: 'After the test, we\'ll analyse your range and recommend the voice part where you\'ll thrive.' },
-          { icon: '✅', title: 'No Wrong Answers', body: 'The test is designed to find your natural strengths — be honest and sing comfortably, not forcefully.' },
+          { icon: '📉', title: 'Phase 1: The Low Siren', body: 'Start softly and smoothly slide your voice downward, going as deep as you naturally can.' },
+          { icon: '📈', title: 'Phase 2: The High Siren', body: 'Sweep your pitch upward. Safely push the ceiling to find out how high you can go.' },
+          { icon: '🗣️', title: 'Phase 3: Tessitura', body: 'Casually read a short sentence out loud to find your comfortable acoustic center.' },
         ].map((item) => (
           <View key={item.title} style={styles.introCard}>
             <Text style={styles.introCardIcon}>{item.icon}</Text>
@@ -295,11 +327,16 @@ function IntroStage({ onStart, onBack }: { onStart: () => void; onBack: () => vo
   );
 }
 
+// ---------------------------------------------------------------------------
+// Results Stage Component
+// ---------------------------------------------------------------------------
 function ResultsStage({
-  results, noteScores, onAccept, onChooseManually,
+  results, minFreq, maxFreq, speakFreq, onAccept, onChooseManually,
 }: {
   results: VoicePartResult[];
-  noteScores: NoteScores;
+  minFreq: number;
+  maxFreq: number;
+  speakFreq: number;
   onAccept: (r: VoicePartResult) => void;
   onChooseManually: () => void;
 }) {
@@ -320,32 +357,26 @@ function ResultsStage({
       </LinearGradient>
 
       <ScrollView contentContainerStyle={styles.resultsContent}>
+        
+        {/* Acoustic Breakdown Box */}
+        <View style={styles.descCard}>
+           <Text style={styles.sectionLabel}>Acoustic Breakdown</Text>
+           <Text style={styles.rangeSummaryText}>
+             • Lowest Boundary: <Text style={{fontWeight:'900'}}>{Math.round(minFreq)} Hz</Text>{'\n'}
+             • Highest Boundary: <Text style={{fontWeight:'900'}}>{Math.round(maxFreq)} Hz</Text>{'\n'}
+             • Speaking Anchor: <Text style={{fontWeight:'900'}}>{Math.round(speakFreq)} Hz</Text>{'\n\n'}
+             This biological profile perfectly correlates with a standard <Text style={{fontWeight:'900', color: top.color}}>{top.label}</Text>!
+           </Text>
+        </View>
+
         {/* Description */}
         <View style={styles.descCard}>
           <Text style={styles.descText}>{top.description}</Text>
           <Text style={styles.encouragementText}>💬 {top.encouragement}</Text>
         </View>
 
-        {/* Note-by-note performance */}
-        <Text style={styles.sectionLabel}>Your Range Performance</Text>
-        <View style={styles.rangeGrid}>
-          {TEST_NOTES.map((note) => {
-            const score = noteScores[note.name] ?? 0;
-            const hit = score >= MIN_SCORE_THRESHOLD;
-            return (
-              <View key={note.name} style={styles.rangeCell}>
-                <View style={[styles.rangeDot, { backgroundColor: hit ? '#22c55e' : '#444' }]}>
-                  <Text style={styles.rangeDotText}>{hit ? '✓' : '·'}</Text>
-                </View>
-                <Text style={styles.rangeCellNote}>{note.name}</Text>
-                <Text style={styles.rangeCellScore}>{score}%</Text>
-              </View>
-            );
-          })}
-        </View>
-
         {/* All part scores */}
-        <Text style={styles.sectionLabel}>Full Breakdown</Text>
+        <Text style={styles.sectionLabel}>Overlap Breakdown</Text>
         {results.map((r, i) => (
           <View key={r.part} style={styles.partRow}>
             <Text style={styles.partRowIcon}>{r.icon}</Text>
@@ -387,66 +418,19 @@ function ResultsStage({
   );
 }
 
-function CountdownRing({ seconds, total, accuracy }: { seconds: number; total: number; accuracy: number }) {
-  const color = accuracy >= 70 ? '#22c55e' : accuracy >= 40 ? '#eab308' : '#ef4444';
-  return (
-    <View style={styles.countdown}>
-      <Text style={[styles.countdownNum, { color }]}>{seconds}</Text>
-      <Text style={styles.countdownLabel}>seconds left</Text>
-    </View>
-  );
-}
-
-function AccuracyBar({ accuracy, best }: { accuracy: number; best: number }) {
-  const liveColor = accuracy >= 70 ? '#22c55e' : accuracy >= 40 ? '#eab308' : '#ef4444';
-  return (
-    <View style={styles.accContainer}>
-      <View style={styles.accBarRow}>
-        <Text style={styles.accBarLabel}>Live</Text>
-        <View style={styles.accBarBg}>
-          <View style={[styles.accBarFill, { width: `${accuracy}%` as any, backgroundColor: liveColor }]} />
-        </View>
-        <Text style={[styles.accBarVal, { color: liveColor }]}>{accuracy}%</Text>
-      </View>
-      <View style={styles.accBarRow}>
-        <Text style={styles.accBarLabel}>Best</Text>
-        <View style={styles.accBarBg}>
-          <View style={[styles.accBarFill, { width: `${best}%` as any, backgroundColor: '#667eea' }]} />
-        </View>
-        <Text style={[styles.accBarVal, { color: '#667eea' }]}>{best}%</Text>
-      </View>
-    </View>
-  );
-}
-
-function ScoreDisplay({ score }: { score: number }) {
-  const color = score >= 70 ? '#22c55e' : score >= 40 ? '#eab308' : '#ef4444';
-  const label = score >= 70 ? 'Hit it! 🎯' : score >= 40 ? 'Close! 👍' : 'Out of range';
-  return (
-    <View style={styles.scorebox}>
-      <Text style={[styles.scoreNum, { color }]}>{score}%</Text>
-      <Text style={[styles.scoreLabel, { color }]}>{label}</Text>
-    </View>
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Styles
+// Shared Styles
 // ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f1a' },
-
-  // Header
   header: { paddingTop: 52, paddingBottom: 20, paddingHorizontal: 20 },
   fullHeader: { paddingTop: 60, paddingBottom: 32, paddingHorizontal: 24, alignItems: 'center' },
-  backBtn: { marginBottom: 12 },
+  backBtn: { marginBottom: 12, width: 80 },
   backBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 15 },
   headerTitle: { fontSize: 22, fontWeight: '800', color: '#fff', marginBottom: 2 },
   headerSub: { fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 12 },
   progressBg: { height: 5, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 3, overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: '#667eea', borderRadius: 3 },
-
-  // Intro
   introIcon: { fontSize: 52, marginBottom: 12 },
   introTitle: { fontSize: 32, fontWeight: '900', color: '#fff', textAlign: 'center', lineHeight: 38, marginBottom: 8 },
   introSubtitle: { fontSize: 16, color: 'rgba(255,255,255,0.7)', textAlign: 'center' },
@@ -459,51 +443,34 @@ const styles = StyleSheet.create({
   startBtn: { borderRadius: 14, overflow: 'hidden', marginTop: 12 },
   startBtnGradient: { paddingVertical: 18, alignItems: 'center' },
   startBtnText: { color: '#fff', fontSize: 18, fontWeight: '800' },
-
-  // Testing
-  content: { padding: 20, paddingBottom: 40, alignItems: 'center' },
+  content: { padding: 20, paddingBottom: 40, alignItems: 'center', flex: 1, justifyContent: 'center' },
+  gaugeContainer: { flex: 1, maxHeight: 150, width: '100%', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  gaugeTrack: { width: 30, flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 15, overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)' },
+  gaugeFill: { width: '100%', position: 'absolute' },
+  gaugeHint: { fontSize: 14, color: 'rgba(255,255,255,0.5)', marginTop: 12, fontWeight: '700' },
   noteCard: {
-    backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 20, paddingVertical: 28,
-    paddingHorizontal: 48, alignItems: 'center', marginBottom: 24, width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 20, paddingVertical: 32,
+    paddingHorizontal: 48, alignItems: 'center', marginBottom: 32, width: '100%',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
   },
-  noteLabelTag: { fontSize: 12, color: '#667eea', fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6 },
-  noteName: { fontSize: 68, fontWeight: '900', color: '#fff', lineHeight: 72 },
-  noteFreq: { fontSize: 14, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  noteLabelTag: { fontSize: 14, color: '#667eea', fontWeight: '800', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 12 },
+  noteName: { fontSize: 82, fontWeight: '900', color: '#fff', lineHeight: 90 },
+  extremeFound: { fontSize: 18, color: '#22c55e', marginTop: 16, fontWeight: '700' },
   phaseBox: { alignItems: 'center', width: '100%', gap: 16 },
-  phaseTitle: { fontSize: 22, fontWeight: '800', color: '#fff' },
+  phaseTitle: { fontSize: 22, fontWeight: '800', color: '#fff', textAlign: 'center' },
   phaseDesc: { fontSize: 15, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 22 },
-  phaseAnimText: { fontSize: 64 },
+  sentenceCard: { backgroundColor: 'rgba(255,255,255,0.1)', paddingVertical: 14, paddingHorizontal: 20, borderRadius: 12, marginVertical: 8 },
+  sentenceText: { fontSize: 16, fontWeight: '600', color: '#fff', fontStyle: 'italic', textAlign: 'center' },
   singPrompt: { fontSize: 18, fontWeight: '700', color: '#fff' },
   primaryBtn: {
     backgroundColor: '#667eea', borderRadius: 14, paddingVertical: 16,
     paddingHorizontal: 32, alignItems: 'center', width: '100%',
   },
   primaryBtnText: { color: '#fff', fontSize: 17, fontWeight: '800' },
-
-  // Countdown
-  countdown: { alignItems: 'center', marginBottom: 8 },
-  countdownNum: { fontSize: 72, fontWeight: '900', lineHeight: 80 },
-  countdownLabel: { fontSize: 14, color: 'rgba(255,255,255,0.5)' },
-
-  // Accuracy bars
-  accContainer: { width: '100%', gap: 10 },
-  accBarRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  accBarLabel: { width: 30, fontSize: 12, color: 'rgba(255,255,255,0.5)', fontWeight: '600' },
-  accBarBg: { flex: 1, height: 10, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 5, overflow: 'hidden' },
-  accBarFill: { height: '100%', borderRadius: 5 },
-  accBarVal: { width: 36, fontSize: 13, fontWeight: '700', textAlign: 'right' },
-
-  // Score display
-  scorebox: { alignItems: 'center', paddingVertical: 12 },
-  scoreNum: { fontSize: 72, fontWeight: '900' },
-  scoreLabel: { fontSize: 18, fontWeight: '700', marginTop: -4 },
-
-  // Note strip
-  noteStrip: { flexDirection: 'row', gap: 6, marginTop: 32, flexWrap: 'wrap', justifyContent: 'center' },
-  stripDot: { width: 10, height: 10, borderRadius: 5 },
-
-  // Results header
+  countdown: { alignItems: 'center', marginBottom: 16 },
+  countdownNum: { fontSize: 86, fontWeight: '900', lineHeight: 95 },
+  countdownLabel: { fontSize: 16, color: 'rgba(255,255,255,0.5)', marginTop: -6 },
+  scoreLabel: { fontSize: 20, fontWeight: '700', color: '#22c55e', marginBottom: 8 },
   resultsHeader: { paddingTop: 60, paddingBottom: 28, paddingHorizontal: 24, alignItems: 'center' },
   resultsIcon: { fontSize: 48, marginBottom: 8 },
   resultsTitle: { fontSize: 14, color: 'rgba(255,255,255,0.7)', letterSpacing: 2, textTransform: 'uppercase' },
@@ -511,23 +478,12 @@ const styles = StyleSheet.create({
   resultsRange: { fontSize: 16, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
   confBadge: { marginTop: 10, borderWidth: 1.5, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 4 },
   confBadgeText: { fontSize: 13, fontWeight: '700' },
-
-  // Results content
   resultsContent: { padding: 20, paddingBottom: 48, backgroundColor: '#f0f2f5' },
-  descCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, marginBottom: 20 },
+  descCard: { backgroundColor: '#fff', borderRadius: 16, padding: 18, marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
   descText: { fontSize: 15, color: '#333', lineHeight: 22, marginBottom: 12 },
   encouragementText: { fontSize: 14, color: '#667eea', fontStyle: 'italic', lineHeight: 20 },
-  sectionLabel: { fontSize: 13, fontWeight: '700', color: '#888', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 12 },
-
-  // Range grid
-  rangeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 28 },
-  rangeCell: { alignItems: 'center', width: 52 },
-  rangeDot: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
-  rangeDotText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  rangeCellNote: { fontSize: 11, color: '#555', fontWeight: '600' },
-  rangeCellScore: { fontSize: 10, color: '#999' },
-
-  // Part rows
+  rangeSummaryText: { fontSize: 15, color: '#444', lineHeight: 22 },
+  sectionLabel: { fontSize: 13, fontWeight: '700', color: '#888', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10 },
   partRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 8, gap: 12 },
   partRowIcon: { fontSize: 22 },
   partRowInfo: { flex: 1, gap: 6 },
@@ -535,14 +491,10 @@ const styles = StyleSheet.create({
   partRowBarBg: { height: 8, backgroundColor: '#e5e7eb', borderRadius: 4, overflow: 'hidden' },
   partRowBarFill: { height: '100%', borderRadius: 4 },
   partRowScore: { fontSize: 15, fontWeight: '800', width: 40, textAlign: 'right' },
-
-  // Bottom action buttons
   secondaryBtn: { borderWidth: 2, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12 },
   secondaryBtnText: { fontSize: 15, fontWeight: '700' },
-  manualBtn: { paddingVertical: 14, alignItems: 'center', marginTop: 8 },
-  manualBtnText: { fontSize: 14, color: '#aaa', textDecorationLine: 'underline' },
-
-  // Errors
+  manualBtn: { paddingVertical: 14, alignItems: 'center', marginTop: 12 },
+  manualBtnText: { fontSize: 14, color: '#888', textDecorationLine: 'underline' },
   errorBox: { backgroundColor: 'rgba(239,68,68,0.15)', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', alignItems: 'center' },
   errorText: { color: '#f87171', fontSize: 16, fontWeight: '700', marginBottom: 4 },
   errorSub: { color: 'rgba(239,68,68,0.7)', fontSize: 13 },
