@@ -12,7 +12,7 @@ import { useUserProgress } from '../hooks/useUserProgress';
 import { usePitchDetection } from '../hooks/usePitchDetection';
 import { getExercisesForPart } from '../constants/exercises';
 import { getVoicePartInfo } from '../constants/notes';
-import { Exercise, Note } from '../types';
+import { Exercise, Note, PitchResult } from '../types';
 import { calculateAccuracy } from '../utils/pitchUtils';
 import { playReferenceNote, stopReferenceNote } from '../utils/audioUtils';
 
@@ -58,7 +58,7 @@ export function PracticeScreen() {
   // ----------------------------------------------------------------
   const { startListening, stopListening } = usePitchDetection({
     targetFrequency: currentNote?.frequency,
-    onPitchDetected: useCallback((result: import('../types').PitchResult | null) => {
+    onPitchDetected: useCallback((result: PitchResult | null) => {
       if (!result) {
         setDetectedNote(null);
         setDetectedFrequency(null);
