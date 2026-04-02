@@ -40,6 +40,23 @@ export function HomeScreen() {
       </LinearGradient>
 
       <ScrollView style={styles.content}>
+        {/* Voice Discovery Banner */}
+        {!progress.selectedPart ? (
+          <TouchableOpacity
+            style={styles.discoverBanner}
+            onPress={() => navigation.navigate('VoiceTest')}
+            activeOpacity={0.85}
+          >
+            <LinearGradient colors={['#1a1a2e', '#16213e']} style={styles.discoverGradient}>
+              <Text style={styles.discoverIcon}>🎤</Text>
+              <View style={styles.discoverText}>
+                <Text style={styles.discoverTitle}>Not sure where you fit?</Text>
+                <Text style={styles.discoverSub}>Take the Voice Discovery Test →</Text>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : null}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Choose Your Voice Part</Text>
           {VOICE_PARTS.map((part) => (
@@ -50,6 +67,14 @@ export function HomeScreen() {
               isSelected={progress.selectedPart === part.part}
             />
           ))}
+          <View style={styles.utilityLinks}>
+            <TouchableOpacity style={styles.utilityLink} onPress={() => navigation.navigate('VoiceTest')}>
+              <Text style={styles.utilityLinkText}>🔄 Retake Voice Test</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.utilityLink} onPress={() => navigation.navigate('MicTest')}>
+              <Text style={styles.utilityLinkText}>🎤 Test Microphone</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {progress.selectedPart && (
@@ -182,5 +207,56 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#555',
     flex: 1,
+  },
+  discoverBanner: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  discoverGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 18,
+  },
+  discoverIcon: {
+    fontSize: 32,
+    marginRight: 16,
+  },
+  discoverText: {
+    flex: 1,
+  },
+  discoverTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  discoverSub: {
+    fontSize: 14,
+    color: '#ccc',
+    fontWeight: '600',
+  },
+  utilityLinks: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  utilityLink: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(102,126,234,0.1)',
+    borderRadius: 12,
+  },
+  utilityLinkText: {
+    fontSize: 14,
+    color: '#667eea',
+    fontWeight: '600',
   },
 });

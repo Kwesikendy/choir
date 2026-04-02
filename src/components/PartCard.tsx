@@ -42,15 +42,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    overflow: 'hidden',
+    // NOTE: no overflow:hidden here — on Android, overflow:hidden + borderWidth
+    // clips child Text views on re-render, causing the blank card bug.
   },
   selected: {
     borderWidth: 2,
     borderColor: '#4A90D9',
+    borderRadius: 12,
   },
   colorBar: {
     width: 6,
     minHeight: 80,
+    borderTopLeftRadius: 12,
+    borderBottomLeftRadius: 12,
   },
   content: {
     flex: 1,

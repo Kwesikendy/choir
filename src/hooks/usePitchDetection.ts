@@ -30,13 +30,14 @@ interface UsePitchDetectionOptions {
  */
 
 const POLL_INTERVAL_MS = 120;
-const SILENCE_DB_THRESHOLD = -40; // dBFS below which we treat as silence
+const SILENCE_DB_THRESHOLD = -55; // lowered from -40 so lower frequencies/quieter mics trigger
 const SEGMENT_DURATION_MS = 200;   // how long each recorded segment is
 
 export function usePitchDetection({ targetFrequency, onPitchDetected }: UsePitchDetectionOptions = {}) {
   const [isListening, setIsListening] = useState(false);
   const [currentPitch, setCurrentPitch] = useState<PitchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [volumeDb, setVolumeDb] = useState<number>(-160);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -96,6 +97,7 @@ export function usePitchDetection({ targetFrequency, onPitchDetected }: UsePitch
           if (!status.isRecording) return;
 
           const db = status.metering ?? -160;
+          setVolumeDb(db);
           const isVoicePresent = db > SILENCE_DB_THRESHOLD;
 
           if (!isVoicePresent) {
@@ -173,7 +175,7 @@ export function usePitchDetection({ targetFrequency, onPitchDetected }: UsePitch
     return () => { cleanup(); };
   }, [cleanup]);
 
-  return { isListening, currentPitch, error, startListening, stopListening };
+  return { isListening, currentPitch, error, volumeDb, startListening, stopListening };
 }
 
 /**
