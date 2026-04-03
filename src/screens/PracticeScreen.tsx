@@ -15,6 +15,7 @@ import { getVoicePartInfo } from '../constants/notes';
 import { Exercise, Note, PitchResult } from '../types';
 import { calculateAccuracy } from '../utils/pitchUtils';
 import { playReferenceNote, stopReferenceNote } from '../utils/audioUtils';
+import { logVoiceObservation } from '../utils/VoiceMonitorService';
 
 // How long (ms) to hold a correct pitch before advancing automatically
 const NOTE_HOLD_MS = 1200;
@@ -49,6 +50,12 @@ export function PracticeScreen() {
   // Practice time tracking
   const practiceStartRef = useRef<number | null>(null);
 
+  // Smart Coach — track pitch range observed during this session
+  const sessionMinFreqRef = useRef(10000);
+  const sessionMaxFreqRef = useRef(0);
+  const sessionSpeakSumRef = useRef(0);
+  const sessionSpeakCountRef = useRef(0);
+
   const currentNote: Note | null = selectedExercise
     ? selectedExercise.notes[currentNoteIndex]
     : null;
@@ -69,6 +76,14 @@ export function PracticeScreen() {
       setDetectedNote(result.note);
       setDetectedFrequency(result.frequency);
       setCents(result.cents);
+
+      // Smart Coach observation
+      if (result.frequency > 0) {
+        if (result.frequency < sessionMinFreqRef.current) sessionMinFreqRef.current = result.frequency;
+        if (result.frequency > sessionMaxFreqRef.current) sessionMaxFreqRef.current = result.frequency;
+        sessionSpeakSumRef.current += result.frequency;
+        sessionSpeakCountRef.current += 1;
+      }
 
       const acc = calculateAccuracy(result.cents);
       setAccuracy(acc);
@@ -170,6 +185,25 @@ export function PracticeScreen() {
       const elapsedMinutes = (Date.now() - practiceStartRef.current) / 60000;
       await addPracticeTime(Math.round(elapsedMinutes));
     }
+
+    // Log Smart Coach observation
+    const minF = sessionMinFreqRef.current < 10000 ? sessionMinFreqRef.current : 0;
+    const maxF = sessionMaxFreqRef.current > 0 ? sessionMaxFreqRef.current : 0;
+    const spk = sessionSpeakCountRef.current > 0
+      ? sessionSpeakSumRef.current / sessionSpeakCountRef.current : 0;
+    if (minF > 0 && maxF > 0 && spk > 0) {
+      await logVoiceObservation({
+        date: new Date().toISOString(),
+        minFreq: minF,
+        maxFreq: maxF,
+        speakFreq: spk,
+      });
+    }
+    // Reset for next session
+    sessionMinFreqRef.current = 10000;
+    sessionMaxFreqRef.current = 0;
+    sessionSpeakSumRef.current = 0;
+    sessionSpeakCountRef.current = 0;
 
     Alert.alert(
       '🎉 Exercise Complete!',

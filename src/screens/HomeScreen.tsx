@@ -1,12 +1,18 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PartCard } from '../components/PartCard';
+import { PartSuggestionBanner } from '../components/PartSuggestionBanner';
+import { WarmUpScreen } from './WarmUpScreen';
 import { VOICE_PARTS } from '../constants/notes';
 import { VoicePart } from '../types';
 import { useUserProgress } from '../hooks/useUserProgress';
+import { analyseAndSuggest } from '../utils/VoiceMonitorService';
+
+const WARMUP_DATE_KEY = '@choir_last_warmup_date';
 
 type NavigationProp = NativeStackNavigationProp<any>;
 
@@ -14,9 +20,51 @@ export function HomeScreen() {
   const navigation = useNavigation<NavigationProp>();
   const { progress, selectPart } = useUserProgress();
 
+  const [showWarmUp, setShowWarmUp] = useState(false);
+  const [suggestedPart, setSuggestedPart] = useState<VoicePart | null>(null);
+  const [sessionCount, setSessionCount] = useState(0);
+
+  // Show warm-up popup once per calendar day (only if user has a part selected)
+  useEffect(() => {
+    if (!progress.selectedPart) return;
+    const checkWarmUp = async () => {
+      const lastDate = await AsyncStorage.getItem(WARMUP_DATE_KEY);
+      const today = new Date().toDateString();
+      if (lastDate !== today) {
+        setShowWarmUp(true);
+      }
+    };
+    checkWarmUp();
+  }, [progress.selectedPart]);
+
+  // Check Smart Coach suggestion (after 10 sessions)
+  useEffect(() => {
+    if (!progress.selectedPart) return;
+    const checkMonitor = async () => {
+      const result = await analyseAndSuggest(progress.selectedPart!);
+      setSessionCount(result.sessionCount);
+      if (result.shouldSuggest && result.suggestedPart) {
+        setSuggestedPart(result.suggestedPart);
+      }
+    };
+    checkMonitor();
+  }, [progress.selectedPart]);
+
+  const handleWarmUpClose = async () => {
+    await AsyncStorage.setItem(WARMUP_DATE_KEY, new Date().toDateString());
+    setShowWarmUp(false);
+  };
+
   const handlePartSelect = (part: VoicePart) => {
     selectPart(part);
     navigation.navigate('PartOverview', { part });
+  };
+
+  const handleAcceptSuggestion = async () => {
+    if (!suggestedPart) return;
+    await selectPart(suggestedPart);
+    setSuggestedPart(null);
+    navigation.navigate('PartOverview', { part: suggestedPart });
   };
 
   const handlePractice = () => {
@@ -37,9 +85,22 @@ export function HomeScreen() {
       >
         <Text style={styles.title}>Choir Practice</Text>
         <Text style={styles.subtitle}>Learn your vocal part</Text>
+        {progress.selectedPart && sessionCount > 0 && (
+          <Text style={styles.coachBadge}>🧠 Coach: {sessionCount} sessions observed</Text>
+        )}
       </LinearGradient>
 
       <ScrollView style={styles.content}>
+        {/* Smart Coach Banner */}
+        {suggestedPart && (
+          <PartSuggestionBanner
+            suggestedPart={suggestedPart}
+            sessionCount={sessionCount}
+            onAccept={handleAcceptSuggestion}
+            onDismiss={() => setSuggestedPart(null)}
+          />
+        )}
+
         {/* Voice Discovery Banner */}
         {!progress.selectedPart ? (
           <TouchableOpacity
@@ -105,6 +166,9 @@ export function HomeScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Daily Warm-Up Popup — appears once per day */}
+      {showWarmUp && <WarmUpScreen onClose={handleWarmUpClose} />}
     </View>
   );
 }
@@ -128,6 +192,12 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: 'rgba(255,255,255,0.8)',
+  },
+  coachBadge: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+    marginTop: 6,
+    fontWeight: '600',
   },
   content: {
     flex: 1,

@@ -166,9 +166,23 @@ function ExtremeTestStage({ type, onDone, onBack }: { type: 'lowest' | 'highest'
   const progressGroup = type === 'lowest' ? 33 : type === 'highest' ? 66 : 100;
   
   const getTitles = () => {
-    if (type === 'lowest') return { phase: 'Phase 1: Deepest Range', action: 'Find your floor', instruction: 'The Low Siren', desc: 'Sliiiide your voice continuously downwards. Keep dragging it deeper like a fire engine siren until it naturally stops or croaks.' };
-    if (type === 'highest') return { phase: 'Phase 2: Highest Range', action: 'Reach your peak', instruction: 'The High Siren', desc: 'Sliiiide your voice continuously upwards. Keep lifting it higher and higher like a siren until you absolutely can\'t go further.' };
-    return { phase: 'Phase 3: Natural Speaking', action: 'Read out loud', instruction: 'Read the phrase naturally', desc: 'Read exactly in your everyday talking voice. Avoid "putting on a voice" or speaking abnormally high or low.' };
+    if (type === 'lowest') return {
+      phase: 'Phase 1: Deepest Range', action: 'Find your floor', instruction: 'The Low Siren',
+      desc: 'Hum "Mmmm" and smoothly slide your voice as low as it will go without straining. Like a fire engine siren winding down to silence.',
+      phoneticSound: 'Mmmm', phoneticArrow: '↘↘↘', phoneticColor: '#60a5fa',
+      phoneticTip: 'Keep lips together. Let the hum drop naturally — don\'t force it.'
+    };
+    if (type === 'highest') return {
+      phase: 'Phase 2: Highest Range', action: 'Reach your peak', instruction: 'The High Siren',
+      desc: 'Sing "Eeee" and smoothly slide your voice as high as it can go. Like a siren rising up — let it flip into falsetto if it wants to.',
+      phoneticSound: 'Eeee', phoneticArrow: '↗↗↗', phoneticColor: '#f87171',
+      phoneticTip: 'Keep an \'ee\' vowel shape. Don\'t tighten your jaw — let the voice rise freely.'
+    };
+    return {
+      phase: 'Phase 3: Natural Speaking', action: 'Read out loud', instruction: 'Read the phrase naturally',
+      desc: 'Read exactly in your everyday talking voice. Avoid "putting on a voice" or speaking abnormally high or low.',
+      phoneticSound: null, phoneticArrow: null, phoneticColor: '#22c55e', phoneticTip: null
+    };
   };
   
   const t = getTitles();
@@ -250,9 +264,12 @@ function ExtremeTestStage({ type, onDone, onBack }: { type: 'lowest' | 'highest'
                      <Text style={[styles.sentenceText, { color: '#22c55e' }]}>"The quick brown fox jumps over the lazy dog."</Text>
                    </View>
                 ) : (
-                   <Text style={[styles.singPrompt, { color: type === 'lowest' ? '#60a5fa' : '#f87171' }]}>
-                     Keep sliding {type === 'lowest' ? 'down' : 'up'}!
-                   </Text>
+                  <View style={[styles.phoneticCard, { borderColor: t.phoneticColor }]}>
+                    <Text style={[styles.phoneticSound, { color: t.phoneticColor }]}>
+                      {t.phoneticSound} <Text style={styles.phoneticArrow}>{t.phoneticArrow}</Text>
+                    </Text>
+                    <Text style={styles.phoneticTip}>{t.phoneticTip}</Text>
+                  </View>
                 )}
               </View>
             )}
@@ -498,4 +515,12 @@ const styles = StyleSheet.create({
   errorBox: { backgroundColor: 'rgba(239,68,68,0.15)', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', alignItems: 'center' },
   errorText: { color: '#f87171', fontSize: 16, fontWeight: '700', marginBottom: 4 },
   errorSub: { color: 'rgba(239,68,68,0.7)', fontSize: 13 },
+  phoneticCard: {
+    backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1.5,
+    borderRadius: 16, paddingVertical: 14, paddingHorizontal: 20,
+    alignItems: 'center', width: '100%', gap: 6,
+  },
+  phoneticSound: { fontSize: 32, fontWeight: '900' },
+  phoneticArrow: { fontSize: 26 },
+  phoneticTip: { fontSize: 13, color: 'rgba(255,255,255,0.5)', textAlign: 'center', lineHeight: 18 },
 });
