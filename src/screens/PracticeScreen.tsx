@@ -14,7 +14,10 @@ import { getExercisesForPart } from '../constants/exercises';
 import { getVoicePartInfo } from '../constants/notes';
 import { Exercise, Note, PitchResult } from '../types';
 import { calculateAccuracy } from '../utils/pitchUtils';
-import { playReferenceNote, stopReferenceNote } from '../utils/audioUtils';
+import {
+  playReferenceNote, stopReferenceNote,
+  playMelodySequence, stopMelodySequence
+} from '../utils/audioUtils';
 import { logVoiceObservation } from '../utils/VoiceMonitorService';
 
 // How long (ms) to hold a correct pitch before advancing automatically
@@ -32,6 +35,7 @@ export function PracticeScreen() {
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
   const [currentNoteIndex, setCurrentNoteIndex] = useState(0);
   const [isListening, setIsListening] = useState(false);
+  const [isPlayingMelody, setIsPlayingMelody] = useState(false);
 
   // ---------- pitch / score state ----------
   const [detectedNote, setDetectedNote] = useState<string | null>(null);
@@ -254,6 +258,22 @@ export function PracticeScreen() {
     await playReferenceNote(currentNote.frequency, 1000);
   };
 
+  const handlePlayFullMelody = async () => {
+    if (!selectedExercise) return;
+    if (isListening) await handleStopListening();
+
+    if (isPlayingMelody) {
+      stopMelodySequence();
+      setIsPlayingMelody(false);
+      return;
+    }
+
+    setIsPlayingMelody(true);
+    const freqs = selectedExercise.notes.map(n => n.frequency);
+    await playMelodySequence(freqs, 400);
+    setIsPlayingMelody(false);
+  };
+
   // ----------------------------------------------------------------
   // Reset when exercise changes
   // ----------------------------------------------------------------
@@ -265,7 +285,9 @@ export function PracticeScreen() {
     setCents(0);
     accuracySamplesRef.current = [];
     setIsListening(false);
+    setIsPlayingMelody(false);
     stopListening();
+    stopMelodySequence();
   }, [selectedExercise]);
 
   // Cleanup on unmount
@@ -274,6 +296,7 @@ export function PracticeScreen() {
       clearHoldTimer();
       stopListening();
       stopReferenceNote();
+      stopMelodySequence();
     };
   }, []);
 
@@ -329,8 +352,10 @@ export function PracticeScreen() {
                 onPress={() => setSelectedExercise(exercise)}
                 activeOpacity={0.75}
               >
-                <View style={[styles.exerciseTypeIndicator, { backgroundColor: partInfo.color }]}>
-                  <Text style={styles.exerciseTypeText}>{exercise.type[0].toUpperCase()}</Text>
+                <View style={[styles.exerciseTypeIndicator, { backgroundColor: exercise.type === 'repertoire' ? '#8b5cf6' : partInfo.color }]}>
+                  <Text style={styles.exerciseTypeText}>
+                    {exercise.type === 'repertoire' ? '🎵' : exercise.type[0].toUpperCase()}
+                  </Text>
                 </View>
                 <View style={styles.exerciseInfo}>
                   <View style={styles.exerciseNameRow}>
@@ -454,6 +479,21 @@ export function PracticeScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Listen Full Melody (Repertoire Only) */}
+        {selectedExercise.type === 'repertoire' && (
+          <View style={styles.melodyControls}>
+            <TouchableOpacity
+              style={[styles.melodyButton, { backgroundColor: isPlayingMelody ? '#ef4444' : partInfo.color }]}
+              onPress={handlePlayFullMelody}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.melodyButtonText}>
+                {isPlayingMelody ? '⏹ Stop Playback' : '▶ Listen Full Melody'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Listen / stop */}
         <View style={styles.listenControls}>
           <TouchableOpacity
@@ -569,6 +609,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
   },
   listenButtonText: { color: '#fff', fontSize: 17, fontWeight: '800' },
+
+  // Melody playback
+  melodyControls: { paddingHorizontal: 16, marginBottom: 12 },
+  melodyButton: {
+    paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2, shadowRadius: 4, elevation: 3,
+  },
+  melodyButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   // Tips
   tipsCard: {

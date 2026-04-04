@@ -144,3 +144,36 @@ export async function stopReferenceNote(): Promise<void> {
     activeSoundRef = null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Melody sequence playback
+// ---------------------------------------------------------------------------
+
+let isPlayingSequence = false;
+
+/**
+ * Play an array of frequencies sequentially.
+ */
+export async function playMelodySequence(frequencies: number[], noteDurationMs: number = 400): Promise<void> {
+  if (isPlayingSequence) return;
+  isPlayingSequence = true;
+  await configureAudioMode(true);
+
+  for (const freq of frequencies) {
+    if (!isPlayingSequence) break; // Allow early abort
+    try {
+      const uri = buildSineWaveDataUri(freq, noteDurationMs);
+      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true, volume: 0.8 });
+      // Wait for the note duration before playing the next one
+      await new Promise(resolve => setTimeout(resolve, noteDurationMs));
+      sound.unloadAsync().catch(() => {});
+    } catch (err) {
+      console.error('Error playing melody sequence note:', err);
+    }
+  }
+  isPlayingSequence = false;
+}
+
+export function stopMelodySequence(): void {
+  isPlayingSequence = false;
+}

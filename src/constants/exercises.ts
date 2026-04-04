@@ -69,6 +69,18 @@ function generateIntervals(rootNote: string, rootOctave: number): Note[] {
   return notes;
 }
 
+// Helper to parse string notation into Note array (e.g. "C4 C4 G4 G4" -> Note[])
+function parseMelody(melodyString: string): Note[] {
+  return melodyString.split(' ').map(token => {
+    // Basic regex to match note and octave, e.g. "C4", "F#3", "Bb4"
+    const match = token.match(/^([A-G][b#]?)([0-9])$/);
+    if (!match) throw new Error(`Invalid melody note token: ${token}`);
+    const noteName = match[1];
+    const octave = parseInt(match[2], 10);
+    return getNote(noteName, octave);
+  });
+}
+
 // Exercises by voice part
 export function getExercisesForPart(part: VoicePart): Exercise[] {
   const baseExercises: Record<VoicePart, Exercise[]> = {
@@ -108,6 +120,33 @@ export function getExercisesForPart(part: VoicePart): Exercise[] {
         notes: generateIntervals('C', 4),
         difficulty: 'intermediate',
         description: 'Practice singing intervals from unison to octave.'
+      },
+      {
+        id: 'soprano-rep-twinkle',
+        name: 'Song: Twinkle Twinkle',
+        type: 'repertoire',
+        voicePart: 'soprano',
+        notes: parseMelody('C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4'),
+        difficulty: 'beginner',
+        description: 'Sing along to this classic beginner melody.'
+      },
+      {
+        id: 'soprano-rep-row',
+        name: 'Song: Row Your Boat',
+        type: 'repertoire',
+        voicePart: 'soprano',
+        notes: parseMelody('C4 C4 C4 D4 E4 E4 D4 E4 F4 G4'),
+        difficulty: 'beginner',
+        description: 'A great beginner exercise for stepwise motion.'
+      },
+      {
+        id: 'soprano-rep-ode',
+        name: 'Song: Ode to Joy',
+        type: 'repertoire',
+        voicePart: 'soprano',
+        notes: parseMelody('E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4'),
+        difficulty: 'intermediate',
+        description: 'A beautiful masterpiece. Focus on smooth, connected singing.'
       }
     ],
     alto: [
@@ -146,6 +185,33 @@ export function getExercisesForPart(part: VoicePart): Exercise[] {
         notes: generateIntervals('F', 4),
         difficulty: 'intermediate',
         description: 'Practice singing intervals from unison to octave.'
+      },
+      {
+        id: 'alto-rep-twinkle',
+        name: 'Song: Twinkle Twinkle',
+        type: 'repertoire',
+        voicePart: 'alto',
+        notes: parseMelody('F3 F3 C4 C4 D4 D4 C4 Bb3 Bb3 A3 A3 G3 G3 F3'),
+        difficulty: 'beginner',
+        description: 'Sing along to this classic beginner melody transposed for alto.'
+      },
+      {
+        id: 'alto-rep-row',
+        name: 'Song: Row Your Boat',
+        type: 'repertoire',
+        voicePart: 'alto',
+        notes: parseMelody('F3 F3 F3 G3 A3 A3 G3 A3 Bb3 C4'),
+        difficulty: 'beginner',
+        description: 'A great beginner exercise for stepwise motion.'
+      },
+      {
+        id: 'alto-rep-ode',
+        name: 'Song: Ode to Joy',
+        type: 'repertoire',
+        voicePart: 'alto',
+        notes: parseMelody('A3 A3 Bb3 C4 C4 Bb3 A3 G3 F3 F3 G3 A3 A3 G3 G3'),
+        difficulty: 'intermediate',
+        description: 'A beautiful masterpiece. Focus on smooth, connected singing.'
       }
     ],
     tenor: [
@@ -184,6 +250,33 @@ export function getExercisesForPart(part: VoicePart): Exercise[] {
         notes: generateIntervals('C', 3),
         difficulty: 'intermediate',
         description: 'Practice singing intervals from unison to octave.'
+      },
+      {
+        id: 'tenor-rep-twinkle',
+        name: 'Song: Twinkle Twinkle',
+        type: 'repertoire',
+        voicePart: 'tenor',
+        notes: parseMelody('C3 C3 G3 G3 A3 A3 G3 F3 F3 E3 E3 D3 D3 C3'),
+        difficulty: 'beginner',
+        description: 'Sing along to this classic beginner melody transposed for tenor.'
+      },
+      {
+        id: 'tenor-rep-row',
+        name: 'Song: Row Your Boat',
+        type: 'repertoire',
+        voicePart: 'tenor',
+        notes: parseMelody('C3 C3 C3 D3 E3 E3 D3 E3 F3 G3'),
+        difficulty: 'beginner',
+        description: 'A great beginner exercise for stepwise motion.'
+      },
+      {
+        id: 'tenor-rep-ode',
+        name: 'Song: Ode to Joy',
+        type: 'repertoire',
+        voicePart: 'tenor',
+        notes: parseMelody('E3 E3 F3 G3 G3 F3 E3 D3 C3 C3 D3 E3 E3 D3 D3'),
+        difficulty: 'intermediate',
+        description: 'A beautiful masterpiece. Focus on smooth, connected singing.'
       }
     ],
     bass: [
@@ -222,6 +315,33 @@ export function getExercisesForPart(part: VoicePart): Exercise[] {
         notes: generateIntervals('F', 2),
         difficulty: 'intermediate',
         description: 'Practice singing intervals from unison to octave.'
+      },
+      {
+        id: 'bass-rep-twinkle',
+        name: 'Song: Twinkle Twinkle',
+        type: 'repertoire',
+        voicePart: 'bass',
+        notes: parseMelody('G2 G2 D3 D3 E3 E3 D3 C3 C3 B2 B2 A2 A2 G2'),
+        difficulty: 'beginner',
+        description: 'Sing along to this classic beginner melody transposed for bass.'
+      },
+      {
+        id: 'bass-rep-row',
+        name: 'Song: Row Your Boat',
+        type: 'repertoire',
+        voicePart: 'bass',
+        notes: parseMelody('G2 G2 G2 A2 B2 B2 A2 B2 C3 D3'),
+        difficulty: 'beginner',
+        description: 'A great beginner exercise for stepwise motion.'
+      },
+      {
+        id: 'bass-rep-ode',
+        name: 'Song: Ode to Joy',
+        type: 'repertoire',
+        voicePart: 'bass',
+        notes: parseMelody('B2 B2 C3 D3 D3 C3 B2 A2 G2 G2 A2 B2 B2 A2 A2'),
+        difficulty: 'intermediate',
+        description: 'A beautiful masterpiece. Focus on solid tone.'
       }
     ]
   };
